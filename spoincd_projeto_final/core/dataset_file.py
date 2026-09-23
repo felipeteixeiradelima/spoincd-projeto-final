@@ -36,7 +36,9 @@ class DatasetFile:
         return self.filepath.exists()
 
     @retry(stop=stop_after_attempt(3), reraise=True, wait=wait_exponential())
-    def download_dataset(self, base_url: str, proxies: dict, timeout: float | tuple) -> None:
+    def download_dataset(
+        self, base_url: str, proxies: dict | None, timeout: float | tuple | None
+    ) -> None:
         if self.is_downloaded():
             logger.debug("%s is already downloaded", self)
             return

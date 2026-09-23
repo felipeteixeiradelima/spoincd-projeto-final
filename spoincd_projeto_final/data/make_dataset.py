@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from requests.exceptions import HTTPError
 import urllib3
 
 from spoincd_projeto_final.core import DatasetFile
@@ -32,7 +33,11 @@ def _get_dataset_file(
     try:
         dataset_file.download_dataset(base_url=_BASE_URL, proxies=proxies, timeout=timeout)
         return dataset_file
-    except Exception:
+    except HTTPError as e:
+        if e.response.status_code == 404:
+            logger.warning("Dataset for year %s not found (HTTP 404)", year)
+            return None
+
         logger.exception("Error downloading dataset from %s", year)
         return None
 

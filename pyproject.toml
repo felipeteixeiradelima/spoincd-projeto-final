@@ -25,6 +25,7 @@ dependencies = [
     "tenacity",
     "tqdm",
     "typer",
+    "colorlog",
 ]
 requires-python = ">=3.13"
 

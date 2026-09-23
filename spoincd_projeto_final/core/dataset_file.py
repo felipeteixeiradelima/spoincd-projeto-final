@@ -24,7 +24,7 @@ class DatasetFile:
         return f"<DatasetFile(filename={self.filename}, filepath={self.filepath})>"
 
     def __str__(self):
-        return f"<DatasetFile(filename={self.filename}, filepath={self.filepath})>"
+        return f'"{self.filename}"'
 
     def __len__(self):
         return len(self.content) if self.content is not None else 0
@@ -44,12 +44,12 @@ class DatasetFile:
             return
 
         if self.is_saved():
-            logger.debug("%s is already saved", self)
+            logger.info("%s is already saved", self)
             return
 
         url = f"{base_url}/{self.filename}"
 
-        logger.debug("Downloading %s", self)
+        logger.info("Downloading %s", self)
 
         response = requests.get(url, verify=False, proxies=proxies, timeout=timeout)
 
@@ -61,10 +61,9 @@ class DatasetFile:
 
     def save_dataset(self) -> None:
         if self.is_saved():
-            logger.debug("%s is already saved", self)
             return
 
-        logger.debug("Saving %s", self)
+        logger.info("Saving %s", self)
 
         self.filepath.write_bytes(self.content)
 

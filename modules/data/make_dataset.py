@@ -3,11 +3,11 @@ import json
 import os
 from pathlib import Path
 
-from requests.exceptions import HTTPError
 import urllib3
+from requests.exceptions import HTTPError
 
-from spoincd_projeto_final.core import DatasetFile
-from spoincd_projeto_final.util import logging_utils
+from ..core import DatasetFile
+from ..util import logging_utils
 
 urllib3.disable_warnings()
 

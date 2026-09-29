@@ -4,7 +4,7 @@ from pathlib import Path
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from spoincd_projeto_final.util import logging_utils
+from modules.util import logging_utils
 
 logger = logging_utils.get_logger(__name__)
 

@@ -8,154 +8,139 @@ from modules.util import logging_utils
 logger = logging_utils.get_logger(__name__)
 
 
-def encontrar_arquivos_xlsx(diretorio: Path) -> list[Path]:
-    """Localiza e ordena todos os arquivos .xlsx do diretório."""
-    logger.info("Buscando arquivos .xlsx em: '%s'", diretorio.resolve())
-    arquivos = sorted(diretorio.glob("*.xlsx"))
+def find_xlsx_files(dir: Path) -> list[Path]:
+    logger.info("Finding .xlsx files in '%s'...", dir.resolve())
+    files = sorted(dir.glob("*.xlsx"))
 
-    if not arquivos:
-        msg_erro = f"Nenhum arquivo .xlsx encontrado em: '{diretorio}'"
-        logger.error(msg_erro)
-        raise FileNotFoundError(msg_erro)
+    if not files:
+        error_message = f"No .xlsx files found in '{dir}'."
+        logger.error(error_message)
+        raise FileNotFoundError(error_message)
 
-    logger.info("Encontrado(s) %d arquivo(s) para processamento.", len(arquivos))
-    return arquivos
+    logger.info("Found %d file(s) to process.", len(files))
+    return files
 
 
-def extrair_ano_arquivo(nome_arquivo: str) -> int | None:
-    """Extrai o ano (4 dígitos) do nome do arquivo."""
-    match = re.search(r"\d{4}", nome_arquivo)
+def extract_year_from_filename(filename: str) -> int | None:
+    match = re.search(r"\d{4}", filename)
     if match:
-        ano = int(match.group())
-        logger.debug("Ano %d identificado para o arquivo '%s'", ano, nome_arquivo)
-        return ano
+        year = int(match.group())
+        logger.debug("Identified year %d for file '%s'.", year, filename)
+        return year
 
-    logger.warning("Ano não identificado no nome do arquivo: '%s'", nome_arquivo)
+    logger.warning("Cound not indentify year in filename '%s'.", filename)
     return None
 
 
-def ler_abas_semestrais(caminho_arquivo: Path) -> tuple[list[pd.DataFrame], int]:
+def read_semetral_sheets(filepath: Path) -> tuple[list[pd.DataFrame], int]:
     """
     Lê a 2ª e a 3ª abas de um arquivo Excel (semestres), adicionando metadados de origem.
     Retorna os DataFrames lidos e o total de linhas do arquivo.
     """
-    logger.info("Processando arquivo: '%s'", caminho_arquivo.name)
-    ano_referencia = extrair_ano_arquivo(caminho_arquivo.name)
+    logger.info("Processing file '%s'", filepath.name)
+    ref_year = extract_year_from_filename(filepath.name)
 
-    excel_obj = pd.ExcelFile(caminho_arquivo, engine="openpyxl")
-    todas_abas = excel_obj.sheet_names
-    logger.debug("Abas encontradas em '%s': %s", caminho_arquivo.name, todas_abas)
+    excel_obj = pd.ExcelFile(filepath, engine="openpyxl")
+    sheets = excel_obj.sheet_names
+    logger.debug("Sheets found in '%s': %s.", filepath.name, sheets)
 
-    if len(todas_abas) < 3:
+    if len(sheets) < 2:
         logger.warning(
-            "O arquivo '%s' possui apenas %d aba(s). Esperava-se ao menos 3 (descritiva + 2 semestres).",
-            caminho_arquivo.name,
-            len(todas_abas),
+            "File '%s' countains only %d sheet(s); at least 3 were expected (description + 2 semesters).",
+            filepath.name,
+            len(sheets),
         )
 
-    dfs_arquivo = []
-    total_linhas_arquivo = 0
-    abas_semestres = todas_abas[1:3]
+    dfs_files = []
+    total_file_rows = 0
+    semester_sheets = sheets[1:]
 
-    for semestre_idx, nome_aba in enumerate(abas_semestres, start=1):
-        logger.info("Lendo aba '%s' (Semestre %d)...", nome_aba, semestre_idx)
-        df_aba = pd.read_excel(excel_obj, sheet_name=nome_aba)
+    for semester_idx, sheet_name in enumerate(semester_sheets, start=1):
+        logger.info("Reading sheet '%s' (Semester nº %d)...", sheet_name, semester_idx)
+        df_sheet = pd.read_excel(excel_obj, sheet_name=sheet_name)
 
-        # Sanitiza cabeçalhos removendo espaços nas pontas
-        df_aba.columns = df_aba.columns.astype(str).str.strip()
+        # Cleaning header
+        df_sheet.columns = df_sheet.columns.astype(str).str.strip()
 
-        # Metadados de rastreabilidade
-        df_aba["ano_referencia"] = ano_referencia
-        df_aba["semestre_referencia"] = semestre_idx
-        df_aba["arquivo_origem"] = caminho_arquivo.name
+        # Metadata
+        df_sheet["ano_referencia"] = ref_year
+        df_sheet["semestre_referencia"] = semester_idx
+        df_sheet["arquivo_origem"] = filepath.name
 
-        qtd_linhas = len(df_aba)
-        total_linhas_arquivo += qtd_linhas
-        dfs_arquivo.append(df_aba)
+        n_rows = len(df_sheet)
+        total_file_rows += n_rows
+        dfs_files.append(df_sheet)
 
         logger.debug(
-            "Aba '%s' carregada: %d linhas e %d colunas.",
-            nome_aba,
-            qtd_linhas,
-            len(df_aba.columns),
+            "Sheet '%s' loaded: %d rows and %d columns.",
+            sheet_name,
+            n_rows,
+            len(df_sheet.columns),
         )
 
-    return dfs_arquivo, total_linhas_arquivo
+    return dfs_files, total_file_rows
 
 
-def concatenar_e_validar(dfs: list[pd.DataFrame], total_esperado: int) -> pd.DataFrame:
-    """Concatena os DataFrames e valida a integridade da contagem de linhas."""
-    logger.info("Concatenando %d blocos de dados...", len(dfs))
-    df_consolidado = pd.concat(dfs, ignore_index=True)
+def concat_and_validate(
+    dfs: list[pd.DataFrame], num_expected_rows: int
+) -> pd.DataFrame:
+    logger.info("Contatenating %d blocks of data...", len(dfs))
+    df_full = pd.concat(dfs, ignore_index=True)
 
-    linhas_finais = len(df_consolidado)
-    if linhas_finais != total_esperado:
-        msg_erro = (
-            f"Falha de integridade: Esperadas {total_esperado} linhas, "
-            f"mas o DataFrame consolidado tem {linhas_finais}."
+    n_rows = len(df_full)
+    if n_rows != num_expected_rows:
+        error_message = (
+            f"Integrity error: Expected {num_expected_rows} rows, "
+            f"but full DataFrame has {n_rows}."
         )
-        logger.error(msg_erro)
-        raise AssertionError(msg_erro)
+        logger.error(error_message)
+        raise AssertionError(error_message)
 
-    logger.info("Integridade verificada com sucesso: %d linhas totais.", linhas_finais)
-    return df_consolidado
+    logger.info("Integrity checked: %d rows in total.", n_rows)
+    return df_full
 
 
-def salvar_em_csv(
+def export_to_csv(
     df: pd.DataFrame,
-    caminho_saida: Path,
-    separador: str = ";",
-    codificacao: str = "utf-8",
+    dest_path: Path,
+    separator: str = ";",
+    encoding: str = "utf-8",
 ) -> None:
-    """
-    Exporta o DataFrame consolidado para .csv.
-    Por padrão usa ponto e vírgula (;) e codificação utf-8 para preservar acentuações.
-    """
-    caminho_saida.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(
-        "Exportando dados consolidados para CSV em: '%s' (sep='%s', encoding='%s')...",
-        caminho_saida.resolve(),
-        separador,
-        codificacao,
+        "Exporting consolidated data do CSV in '%s' (sep='%s', encoding='%s')...",
+        dest_path.resolve(),
+        separator,
+        encoding,
     )
 
     df.to_csv(
-        caminho_saida,
-        sep=separador,
+        dest_path,
+        sep=separator,
         index=False,
-        encoding=codificacao,
+        encoding=encoding,
     )
 
     logger.info(
-        "Arquivo CSV exportado com sucesso: '%s' (%s linhas).",
-        caminho_saida.name,
+        "CSV files exported successfully: '%s' (%s linhas).",
+        dest_path.name,
         f"{len(df):,}",
     )
 
 
-def consolidar_excels(diretorio_origem: str, arquivo_saida: str) -> None:
-    """Fluxo orquestrador da consolidação dos dados anuais para CSV."""
-    logger.info("=== Iniciando Pipeline de Consolidação ===")
-    diretorio = Path(diretorio_origem)
-    destino = Path(arquivo_saida)
+def unify_dataset(src_dir_path: str, dest_file_path: str) -> None:
+    src_dir = Path(src_dir_path)
+    dest_file = Path(dest_file_path)
 
-    arquivos = encontrar_arquivos_xlsx(diretorio)
+    files = find_xlsx_files(src_dir)
 
-    todos_dfs: list[pd.DataFrame] = []
-    total_linhas_esperadas = 0
+    dfs: list[pd.DataFrame] = []
+    num_expected_rows = 0
 
-    for arq in arquivos:
-        dfs_arquivo, linhas_arquivo = ler_abas_semestrais(arq)
-        todos_dfs.extend(dfs_arquivo)
-        total_linhas_esperadas += linhas_arquivo
+    for arq in files:
+        dfs_file, num_rows_file = read_semetral_sheets(arq)
+        dfs.extend(dfs_file)
+        num_expected_rows += num_rows_file
 
-    df_consolidado = concatenar_e_validar(todos_dfs, total_linhas_esperadas)
-    salvar_em_csv(df_consolidado, destino)
-    logger.info("=== Pipeline Concluído com Sucesso ===")
-
-
-if __name__ == "__main__":
-    consolidar_excels(
-        diretorio_origem="./data/raw",
-        arquivo_saida="./data/interim/dataset_consolidado.csv",
-    )
+    df_full = concat_and_validate(dfs, num_expected_rows)
+    export_to_csv(df_full, dest_file)

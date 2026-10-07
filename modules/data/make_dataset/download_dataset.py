@@ -6,8 +6,8 @@ from pathlib import Path
 import urllib3
 from requests.exceptions import HTTPError
 
-from ..core import DatasetFile
-from ..util import logging_utils
+from modules.core import DatasetFile
+from modules.util import logging_utils
 
 urllib3.disable_warnings()
 
@@ -31,7 +31,9 @@ def _get_dataset_file(
     )
 
     try:
-        dataset_file.download_dataset(base_url=_BASE_URL, proxies=proxies, timeout=timeout)
+        dataset_file.download_dataset(
+            base_url=_BASE_URL, proxies=proxies, timeout=timeout
+        )
         return dataset_file
     except HTTPError as e:
         if e.response.status_code == 404:
@@ -56,7 +58,9 @@ def _get_all_dataset_files(
     latest_year_flag = final_year is None
 
     if not latest_year_flag and initial_year > final_year:
-        raise ValueError("Initial dataset year must be less than or equal to final dataset year")
+        raise ValueError(
+            "Initial dataset year must be less than or equal to final dataset year"
+        )
 
     if not latest_year_flag:
         final_year = int(final_year)
@@ -86,12 +90,14 @@ def _save_dataset_files(dataset_files: list[DatasetFile]):
         dataset_file.save_dataset()
 
 
-def make_dataset(
+def download_dataset(
     dest_dir_path: str | os.PathLike[str] | Path,
     proxies: dict | None = None,
     timeout: float | tuple | None = None,
 ):
-    dataset_files = _get_all_dataset_files(dest_dir_path, proxies=proxies, timeout=timeout)
+    dataset_files = _get_all_dataset_files(
+        dest_dir_path, proxies=proxies, timeout=timeout
+    )
     _save_dataset_files(dataset_files)
 
 
@@ -114,7 +120,7 @@ def main():
     )
 
     args = parser.parse_args()
-    make_dataset(
+    download_dataset(
         dest_dir_path=args.dest_dir_path,
         proxies=args.proxies,
         timeout=args.timeout,

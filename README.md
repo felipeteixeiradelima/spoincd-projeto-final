@@ -2,13 +2,6 @@
 
 Projeto final da disciplina Introdução à Ciência de Dados do curso Bacharelado em Sistemas de Informação do IFSP-SPO.
 
-## Autores
-
-- **Andrey Gustavo Segantin dos Santos** - *SP3155439* - [AndreyGustavo267](https://github.com/AndreyGustavo267) - [LinkedIn](https://linkedin.com/in/felipe-teixeira-de-lima)
-- **Elton Lima Araujo** - *SP3155544* - [Elton1466](https://github.com/Elton1466) - [LinkedIn](https://linkedin.com/in/seu-perfil)
-- **Felipe Teixeira de Lima** - *SP3155048* - [felipeteixeiradelima](https://github.com/felipeteixeiradelima) - [LinkedIn](https://linkedin.com/in/seu-perfil)
-- **João Gustavo dos Santos** - *SP3154211* - [joaogust](https://github.com/joaogust) - [LinkedIn](https://br.linkedin.com/in/joao-gustavo-dos-santos)
-
 ## 👥 Autores
 
 - **Andrey Gustavo Segantin dos Santos** - *SP3155439* 
@@ -31,7 +24,7 @@ Projeto final da disciplina Introdução à Ciência de Dados do curso Bacharela
   [![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/joaogust)
   [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/joao-gustavo-dos-santos)
 
-## Organização do Projeto
+## 🗂️ Organização do Projeto
 
 ```
 ├── LICENSE            <- Licença open-source do projeto

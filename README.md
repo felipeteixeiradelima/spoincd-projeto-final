@@ -30,6 +30,7 @@ Projeto final da disciplina Introdução à Ciência de Dados do curso Bacharela
 ├── LICENSE            <- Licença open-source do projeto
 ├── README.md          <- README principal para desenvolvedores que usam este projeto.
 ├── data
+│   ├── interim        <- Dados intermediários que foram transformados.
 │   ├── processed      <- Conjuntos de dados finais e canônicos para modelagem.
 │   └── raw            <- Dump original e imutável dos dados.
 │

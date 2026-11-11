@@ -1,0 +1,350 @@
+"""
+Atualiza o notebook 03-modelagem-risco.ipynb com o protocolo experimental completo,
+modular, estatisticamente rigoroso e alinhado aos 8 passos do enunciado.
+"""
+
+import json
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+NB_PATH = ROOT_DIR / "notebooks" / "03-modelagem-risco.ipynb"
+
+cells = [
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "# Fase 3: Modelagem, Protocolo Experimental e Inferência Estatística\n",
+            "\n",
+            "Este notebook implementa a experimentação rigorosa para a previsão e classificação do nível de risco criminal (Alto/Baixo) no entorno do campus do **IFSP-SPO**.\n",
+            "\n",
+            "O pipeline foi arquitetado em estrita conformidade com os passos metodológicos do enunciado acadêmico e as diretrizes de reprodutibilidade da conferência **ACL 2023**:\n",
+            "\n",
+            "1. **Passo 1:** Testes de sanidade e consistência estrutural nos 4 modelos supervisionados;\n",
+            "2. **Passo 2:** Definição da população-alvo e particionamento temporal cronológico;\n",
+            "3. **Passos 3 e 4:** Treinamento, validação e replicação Monte Carlo com 30 sementes aleatórias (42 a 71) e salvamento de 120 checkpoints;\n",
+            "4. **Passo 5:** Análise estatística formal (Intervalos de Confiança a 95%, Teste Omnibus de Friedman e Teste Post-Hoc de Wilcoxon com correção de Holm-Bonferroni);\n",
+            "5. **Passo 6:** Avaliação da generalização em dados não vistos (2026), confronto contra baseline da classe majoritária e auditoria de *Concept Drift*;\n",
+            "6. **Passo 7:** Treinamento e serialização do artefato definitivo para deploy (100% dos dados)."
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## 1. Importação de Bibliotecas e Módulos do Projeto"
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "import os\n",
+            "import sys\n",
+            "from pathlib import Path\n",
+            "\n",
+            "# Adiciona o diretório raiz ao PYTHONPATH para importar o pacote modules\n",
+            "root_path = Path.cwd().parent\n",
+            "if str(root_path) not in sys.path:\n",
+            "    sys.path.insert(0, str(root_path))\n",
+            "\n",
+            "import matplotlib.pyplot as plt\n",
+            "import numpy as np\n",
+            "import pandas as pd\n",
+            "import seaborn as sns\n",
+            "\n",
+            "from modules.config import (\n",
+            "    BASE_RANDOM_SEED,\n",
+            "    DATA_PROCESSED_DIR,\n",
+            "    DEV_TEST_SPLIT_RATIO,\n",
+            "    FINAL_MODEL_NAME,\n",
+            "    MODELS_FINAL_DIR,\n",
+            "    N_EXPERIMENT_ITERATIONS,\n",
+            "    PROCESSED_DATASET_NAME,\n",
+            ")\n",
+            "from modules.features import apply_risk_threshold_without_leakage, split_dev_test_chronological\n",
+            "from modules.modeling.evaluation import (\n",
+            "    analyze_concept_drift,\n",
+            "    compute_confidence_intervals,\n",
+            "    evaluate_unseen_data,\n",
+            "    run_friedman_test,\n",
+            "    run_posthoc_wilcoxon,\n",
+            ")\n",
+            "from modules.modeling.predict import format_risk_prediction, load_model\n",
+            "from modules.modeling.train import (\n",
+            "    get_model_constructors,\n",
+            "    run_experiments,\n",
+            "    run_sanity_check,\n",
+            "    train_final_model,\n",
+            ")\n",
+            "from modules.plots import plot_confidence_intervals, plot_confusion_matrix, plot_f1_distributions\n",
+            "\n",
+            "sns.set_theme(style=\"whitegrid\")\n",
+            "print(\"Ambiente e módulos do projeto importados com sucesso.\")"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## 2. Carga dos Dados Processados e Particionamento Temporal Estrito\n",
+            "\n",
+            "Para assegurar integridade metodológica absoluta e evitar qualquer vazamento de dados (*data leakage*):\n",
+            "* Os **85% iniciais** da série cronológica (2022 a início de 2026) são destinados ao conjunto de **Desenvolvimento** ($X_{dev}, y_{dev}$);\n",
+            "* Os **15% finais** (2026) são isolados estritamente para o **Passo 6** (teste de generalização em dados não vistos);\n",
+            "* O limiar da mediana de crimes por janela é **calculado estritamente sobre $y_{dev}$**, garantindo zero vazamento da distribuição futura."
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Carregar dataset pré-processado\n",
+            "df_processed = pd.read_csv(DATA_PROCESSED_DIR / PROCESSED_DATASET_NAME, sep=\";\")\n",
+            "\n",
+            "# Particionamento temporal estrito\n",
+            "df_dev_raw, df_test_raw = split_dev_test_chronological(df_processed, split_ratio=DEV_TEST_SPLIT_RATIO)\n",
+            "\n",
+            "# Aplicação do limiar de risco sem vazamento de alvo\n",
+            "df_dev, df_test, threshold = apply_risk_threshold_without_leakage(df_dev_raw, df_test_raw)\n",
+            "\n",
+            "# Matriz de atributos dinâmicos e causais\n",
+            "period_dummies = [c for c in df_processed.columns if c.startswith(\"PERIODO_\") and c != \"PERIODO_LETIVO_IFSP\"]\n",
+            "feature_cols = [\n",
+            "    \"ANO\",\n",
+            "    \"MES\",\n",
+            "    \"DIA_SEMANA\",\n",
+            "    \"FLAG_FIM_DE_SEMANA\",\n",
+            "    \"TRIMESTRE\",\n",
+            "    \"PERIODO_LETIVO_IFSP\",\n",
+            "    \"CRIMES_LAG_1\",\n",
+            "    \"CRIMES_LAG_4\",\n",
+            "    \"CRIMES_MEDIA_MOVEL_7D\",\n",
+            "] + period_dummies\n",
+            "\n",
+            "X_dev = df_dev[feature_cols]\n",
+            "y_dev = df_dev[\"RISCO_ALTO\"]\n",
+            "X_test = df_test[feature_cols]\n",
+            "y_test = df_test[\"RISCO_ALTO\"]\n",
+            "\n",
+            "print(f\"Tamanho Desenvolvimento: {len(X_dev)} janelas (limiar de Risco Alto > {threshold:.1f} crimes)\")\n",
+            "print(f\"Tamanho Teste Final:     {len(X_test)} janelas (isolado até o Passo 6)\")\n",
+            "print(f\"Features dinâmicas ({len(feature_cols)}): {feature_cols}\")"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## Passo 1 do Enunciado: Teste de Sanidade e Consistência (Todos os 4 Modelos)\n",
+            "\n",
+            "Validação antecipada da implementação dos **4 classificadores supervisionados** sobre uma amostra reduzida (30 instâncias):\n",
+            "1. Checagem de compatibilidade de shapes e dimensões;\n",
+            "2. Verificação de ausência de nulos/inconsistências;\n",
+            "3. Capacidade de convergência e aprendizado supervisionado (overfit proposital da árvore sem poda)."
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "models = get_model_constructors()\n",
+            "X_sanity = X_dev.iloc[:30].copy()\n",
+            "y_sanity = y_dev.iloc[:30].copy()\n",
+            "\n",
+            "sanity_results = run_sanity_check(models, X_sanity, y_sanity)\n",
+            "\n",
+            "for model_name, acc in sanity_results.items():\n",
+            "    print(f\"[Sanidade OK] {model_name:<20}: Acurácia no subconjunto = {acc*100:.1f}%\")\n",
+            "print(\"Implementações validadas com sucesso para todos os 4 algoritmos.\")"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## Passos 3 e 4 do Enunciado: Execução e Replicação Experimental (30 Sementes)\n",
+            "\n",
+            "Execução de 30 iterações com particionamento Monte Carlo estratificado ($80/20$) dentro de $X_{dev}$ variando sementes de $42$ a $71$.\n",
+            "Todos os 120 pesos treinados são salvos em `models/checkpoints/` acompanhados do registro tabular de métricas em `log_experimentos.csv`."
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "df_results = run_experiments(\n",
+            "    models,\n",
+            "    X_dev,\n",
+            "    y_dev,\n",
+            "    n_iterations=N_EXPERIMENT_ITERATIONS,\n",
+            "    base_seed=BASE_RANDOM_SEED,\n",
+            ")\n",
+            "\n",
+            "print(f\"{len(df_results)} experimentos concluídos e checkpoints salvos em models/checkpoints/.\")\n",
+            "df_results.head()"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## Passo 5 do Enunciado: Análise Estatística Formal dos Resultados\n",
+            "\n",
+            "Conforme as diretrizes da ACL 2023 e recomendações clássicas de avaliação comparativa de algoritmos de aprendizado (Demšar, 2006):\n",
+            "1. **Intervalos de Confiança a 95%:** Calculados via distribuição $t$ de Student ($gl = 29$) para F1-Score e Acurácia;\n",
+            "2. **Teste Omnibus de Friedman:** Teste não-paramétrico pareado para avaliar se há diferença significativa entre múltiplos classificadores;\n",
+            "3. **Teste Post-Hoc Pareado de Wilcoxon com Correção de Holm-Bonferroni:** Identifica quais pares de modelos diferem com controle estrito da taxa de erro familiar (FWER);\n",
+            "4. **Princípio da Parcimônia (Navalha de Occam):** Análise da relação custo-benefício entre explicabilidade (Árvore de Decisão) e complexidade de ensemble (Gradient Boosting)."
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# 1. Intervalos de Confiança (95%)\n",
+            "df_ci = compute_confidence_intervals(df_results, metric=\"F1_Score\", confidence=0.95)\n",
+            "display(df_ci[[\"Modelo\", \"Média\", \"Desvio_Padrão\", \"IC_95%_Inf\", \"IC_95%_Sup\", \"Mediana\"]])\n",
+            "\n",
+            "# Visualizações estatísticas\n",
+            "fig_box = plot_f1_distributions(df_results, metric=\"F1_Score\")\n",
+            "plt.show()\n",
+            "\n",
+            "fig_ci = plot_confidence_intervals(df_ci, metric_label=\"F1-Score\")\n",
+            "plt.show()\n",
+            "\n",
+            "# 2. Teste Omnibus de Friedman\n",
+            "stat_f, p_f, is_sig_f = run_friedman_test(df_results, metric=\"F1_Score\")\n",
+            "print(f\"Teste de Friedman: Estatística = {stat_f:.4f}, p-valor = {p_f:.4e}\")\n",
+            "if is_sig_f:\n",
+            "    print(\"Rejeita-se H0: existe superioridade estatisticamente significante entre os classificadores.\\n\")\n",
+            "\n",
+            "# 3. Teste Post-Hoc Pareado de Wilcoxon com Ajuste de Holm\n",
+            "df_posthoc = run_posthoc_wilcoxon(df_results, metric=\"F1_Score\", alpha=0.05)\n",
+            "display(df_posthoc[[\"Comparação\", \"Diferença_Média (A - B)\", \"Vitórias_A\", \"Vitórias_B\", \"p_valor_ajustado_Holm\", \"Significante_5%\"]])\n",
+            "\n",
+            "# 4. Avaliação de Parcimônia\n",
+            "best_model_name = df_ci.iloc[0][\"Modelo\"]\n",
+            "print(f\"Modelo com maior pontuação média: {best_model_name}\")"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## Passo 6 do Enunciado: Estimativa de Erro em Dados Não Vistos e Auditoria de Concept Drift\n",
+            "\n",
+            "O modelo vencedor é treinado sobre **todo o conjunto de desenvolvimento** ($X_{dev}$) e testado exclusivamente no conjunto **$X_{test}$** (15% finais correspondentes ao ano de 2026).\n",
+            "\n",
+            "Comparamos seu desempenho com o baseline ingênuo da classe majoritária (*DummyClassifier*) e auditamos a taxa de criminalidade para quantificar o fenômeno de **Concept Drift** (deslocamento temporal da distribuição)."
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "model_eval = models[best_model_name](BASE_RANDOM_SEED)\n",
+            "eval_res = evaluate_unseen_data(model_eval, X_dev, y_dev, X_test, y_test)\n",
+            "\n",
+            "model_m = eval_res[\"model_metrics\"]\n",
+            "base_m = eval_res[\"baseline_metrics\"]\n",
+            "\n",
+            "print(\"=== DESEMPENHO EM DADOS NÃO VISTOS (2026) ===\")\n",
+            "print(f\"Modelo: {best_model_name}\")\n",
+            "print(f\"  Acurácia:                 {model_m['Acurácia']*100:.2f}%\")\n",
+            "print(f\"  F1-Score:                 {model_m['F1_Score']:.4f}\")\n",
+            "print(f\"  Precisão (Classe Risco):  {model_m['Precisão_Classe_1']*100:.2f}%\")\n",
+            "print(f\"  Recall (Classe Risco):    {model_m['Recall_Classe_1']*100:.2f}%\")\n",
+            "if model_m['ROC_AUC'] is not None:\n",
+            "    print(f\"  ROC-AUC:                  {model_m['ROC_AUC']:.4f}\")\n",
+            "\n",
+            "print(\"\\n=== CONFRONTO COM O BASELINE DA CLASSE MAJORITÁRIA ===\")\n",
+            "print(f\"  Acurácia Baseline Dummy:  {base_m['Acurácia']*100:.2f}%\")\n",
+            "print(f\"  F1-Score Baseline Dummy:  {base_m['F1_Score']:.4f}\")\n",
+            "\n",
+            "# Matriz de confusão\n",
+            "fig_cm = plot_confusion_matrix(eval_res[\"confusion_matrix\"], model_name=best_model_name)\n",
+            "plt.show()\n",
+            "\n",
+            "# Auditoria quantitativa de Concept Drift\n",
+            "drift_audit = analyze_concept_drift(df_dev, df_test)\n",
+            "print(\"\\n=== AUDITORIA DE CONCEPT DRIFT ===\")\n",
+            "print(f\"Volume médio de crimes/janela em Dev (2022-2025):  {drift_audit['dev_crimes_mean_per_window']:.2f}\")\n",
+            "print(f\"Volume médio de crimes/janela em Teste (2026):     {drift_audit['test_crimes_mean_per_window']:.2f}\")\n",
+            "print(f\"Variação na densidade criminal:                     {drift_audit['crime_volume_drift_pct']:.1f}%\")\n",
+            "print(f\"Prevalência de Risco Alto:                          Dev={drift_audit['dev_high_risk_prevalence_pct']:.1f}% vs Teste={drift_audit['test_high_risk_prevalence_pct']:.1f}%\")"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## Passo 7 do Enunciado: Treinamento da Versão Final para Deploy\n",
+            "\n",
+            "Conforme estabelecido pelo enunciado acadêmico:\n",
+            "> *\"Utilize todos os dados disponíveis (treino + validação + teste) para treinar a versão definitiva do modelo que será entregue ou implantada.\"*\n",
+            "\n",
+            "O classificador vencedor é treinado sobre a totalidade do histórico ($X_{dev} \\cup X_{test}$) e serializado em formato `.joblib`."
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "X_full = pd.concat([X_dev, X_test], ignore_index=True)\n",
+            "y_full = pd.concat([y_dev, y_test], ignore_index=True)\n",
+            "\n",
+            "final_model_path = MODELS_FINAL_DIR / FINAL_MODEL_NAME\n",
+            "final_model = train_final_model(\n",
+            "    models[best_model_name],\n",
+            "    X_full,\n",
+            "    y_full,\n",
+            "    seed=BASE_RANDOM_SEED,\n",
+            "    export_path=final_model_path,\n",
+            ")\n",
+            "\n",
+            "print(f\"Artefato final de produção serializado em: {final_model_path.resolve()}\")\n",
+            "\n",
+            "# Teste de inferência operacional\n",
+            "amostra_teste = X_test.iloc[[0]]\n",
+            "resultado_inferencia = format_risk_prediction(final_model, amostra_teste)\n",
+            "print(f\"Simulação de predição operacional em tempo real:\\n{resultado_inferencia}\")"
+        ]
+    }
+]
+
+nb = {
+    "cells": cells,
+    "metadata": {
+        "kernelspec": {
+            "display_name": "Python 3",
+            "language": "python",
+            "name": "python3"
+        },
+        "language_info": {
+            "name": "python",
+            "version": "3.15.1"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5
+}
+
+with open(NB_PATH, "w", encoding="utf-8") as f:
+    json.dump(nb, f, indent=2, ensure_ascii=False)
+
+print(f"Notebook 03 reescrito com sucesso em {NB_PATH}!")

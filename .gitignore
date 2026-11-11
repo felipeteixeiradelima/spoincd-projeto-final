@@ -192,3 +192,8 @@ cython_debug/
 
 # VS Code
 .vscode
+
+# Models
+*.pkl
+*.joblib
+*.csv
